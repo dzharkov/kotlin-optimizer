@@ -19,6 +19,6 @@ public class BasicClassVisitor extends ClassVisitor {
 
     @Override
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-        return new RedundantBoxingMethodVisitor(className, access, name, desc, signature);
+        return new RedundantNullCheckMethodVisitor(className, access, name, desc, signature);
     }
 }
