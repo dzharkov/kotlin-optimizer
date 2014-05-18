@@ -13,9 +13,10 @@ public class Main implements Runnable {
     private final File root;
     private final ClassMethodsTransformer transformer;
     private final RedundantBoxingAnalyzerTransformer redundantBoxingAnalyzerTransformer = new RedundantBoxingAnalyzerTransformer(null);
+    private final RedundantNullCheckMethodTransformer redundantNullCheck = new RedundantNullCheckMethodTransformer(null);
 
     public Main(File root) {
-        transformer = new ClassMethodsTransformer(redundantBoxingAnalyzerTransformer);
+        transformer = new ClassMethodsTransformer(redundantNullCheck);
         this.root = root;
     }
 

@@ -63,6 +63,64 @@ class RedundantBoxingInterpreter extends BasicInterpreter {
         return super.newValue(type);
     }
 
+    private Type getProgressionIteratorType(Type type) {
+        if (type.getSort() != Type.OBJECT) {
+            return null;
+        }
+
+        String internalName = type.getInternalName();
+
+        if (!internalName.startsWith("kotlin/")) {
+            return null;
+        }
+
+        String iteratorType = internalName.substring(
+                "kotlin/".length()
+        );
+
+        if (iteratorType.startsWith("Int")) {
+            return Type.INT_TYPE;
+        }
+        if (iteratorType.startsWith("Long")) {
+            return Type.LONG_TYPE;
+        }
+        if (iteratorType.startsWith("Byte")) {
+            return Type.BYTE_TYPE;
+        }
+        if (iteratorType.startsWith("Char")) {
+            return Type.CHAR_TYPE;
+        }
+        if (iteratorType.startsWith("Boolean")) {
+            return Type.BOOLEAN_TYPE;
+        }
+        if (iteratorType.startsWith("Float")) {
+            return Type.FLOAT_TYPE;
+        }
+        if (iteratorType.startsWith("Double")) {
+            return Type.DOUBLE_TYPE;
+        }
+
+        return null;
+    }
+
+    private boolean isProgressionClass(String internalName) {
+        return internalName.startsWith("kotlin/") && (
+                internalName.endsWith("Progression") ||
+                        internalName.endsWith("Range")
+        );
+    }
+
+    private BoxedBasicValue createOrLoadBoxedValue(AbstractInsnNode insnNode, BasicValue value, List<? extends BasicValue> values, boolean isFromProgression) {
+        int index = insnList.indexOf(insnNode);
+        if (!boxingPlaces.containsKey(index)) {
+            BoxedBasicValue boxedBasicValue = new BoxedBasicValue(value.getType(), values.get(0).getType(), insnNode, isFromProgression);
+            candidatesBoxedValues.add(boxedBasicValue);
+            boxingPlaces.put(index, boxedBasicValue);
+        }
+
+        return boxingPlaces.get(index);
+    }
+
     @Override
     public BasicValue naryOperation(AbstractInsnNode insn, List<? extends BasicValue> values) throws AnalyzerException {
         BasicValue value = super.naryOperation(insn, values);
@@ -73,14 +131,7 @@ class RedundantBoxingInterpreter extends BasicInterpreter {
                 isClassBox(((MethodInsnNode) insn).owner) &&
                 ((MethodInsnNode) insn).name.equals("valueOf")) {
 
-            int index = insnList.indexOf(insn);
-            if (!boxingPlaces.containsKey(index)) {
-                BoxedBasicValue boxedBasicValue = new BoxedBasicValue(value.getType(), values.get(0).getType(), insn);
-                candidatesBoxedValues.add(boxedBasicValue);
-                boxingPlaces.put(index, boxedBasicValue);
-            }
-
-            return boxingPlaces.get(index);
+            return createOrLoadBoxedValue(insn, value, values, false);
         }
 
         if (isUnboxing(insn) &&
@@ -91,13 +142,45 @@ class RedundantBoxingInterpreter extends BasicInterpreter {
             boxedBasicValue.setWasUnboxed(true);
         }
 
+        if (!(insn instanceof MethodInsnNode)) {
+            return value;
+        }
+
+        MethodInsnNode methodInsnNode = (MethodInsnNode) insn;
+
+        if (opcode == Opcodes.INVOKEINTERFACE &&
+                values.get(0).getType() != null &&
+                isProgressionClass(values.get(0).getType().getInternalName())
+                && methodInsnNode.name.equals("iterator")) {
+            Type progressionIteratorType = getProgressionIteratorType(values.get(0).getType());
+            return new ProgressionIteratorBasicValue(value.getType(), progressionIteratorType);
+        }
+
+        if (opcode == Opcodes.INVOKEINTERFACE &&
+                values.get(0) instanceof ProgressionIteratorBasicValue &&
+                ((MethodInsnNode) insn).name.equals("next")) {
+            return createOrLoadBoxedValue(insn, value, values, true);
+        }
+
         return value;
     }
+
+
 
     @Override
     public BasicValue unaryOperation(AbstractInsnNode insn, BasicValue value) throws AnalyzerException {
         if (insn.getOpcode() == Opcodes.CHECKCAST && value instanceof BoxedBasicValue) {
             ((BoxedBasicValue) value).addInsn(insn);
+            return value;
+        }
+
+        if (insn.getOpcode() == Opcodes.CHECKCAST &&
+                value != null && value.getType() != null &&
+                isProgressionClass(value.getType().getInternalName())) {
+            return value;
+        }
+
+        if (insn.getOpcode() == Opcodes.CHECKCAST && value instanceof ProgressionIteratorBasicValue) {
             return value;
         }
 
@@ -118,6 +201,19 @@ class RedundantBoxingInterpreter extends BasicInterpreter {
     public BasicValue merge(BasicValue v, BasicValue w) {
         if (v instanceof BoxedBasicValue && w instanceof BoxedBasicValue && v == w) {
             return v;
+        }
+
+        if (v instanceof ProgressionIteratorBasicValue &&
+                w instanceof ProgressionIteratorBasicValue &&
+                w.equals(v)) {
+            return v;
+        }
+
+        if (v instanceof ProgressionIteratorBasicValue) {
+            v = BasicValue.REFERENCE_VALUE;
+        }
+        if (w instanceof ProgressionIteratorBasicValue) {
+            w = BasicValue.REFERENCE_VALUE;
         }
 
         if (v instanceof BoxedBasicValue) {

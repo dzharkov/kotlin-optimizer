@@ -13,7 +13,9 @@ public class BoxedBasicValue extends BasicValue {
     private final AbstractInsnNode boxingInsn;
     private final Type basicType;
     private final Type boxedType;
+    private final boolean isFromProgression;
     private boolean wasUnboxed = false;
+
 
     private static Type changeType(Type type) {
         assert (type.getSort() == Type.OBJECT);
@@ -22,12 +24,13 @@ public class BoxedBasicValue extends BasicValue {
         return Type.getObjectType(internalName + "Boxed");
     }
 
-    public BoxedBasicValue(Type type, Type boxedType, AbstractInsnNode insnNode) {
+    public BoxedBasicValue(Type type, Type boxedType, AbstractInsnNode insnNode, boolean isFromProgression) {
         super(changeType(type));
         basicType = type;
         this.boxedType = boxedType;
         associatedInsns.add(insnNode);
         boxingInsn = insnNode;
+        this.isFromProgression = isFromProgression;
     }
 
     @Override
@@ -64,5 +67,13 @@ public class BoxedBasicValue extends BasicValue {
 
     public void setWasUnboxed(boolean wasUnboxed) {
         this.wasUnboxed = wasUnboxed;
+    }
+
+    public boolean isFromProgression() {
+        return isFromProgression;
+    }
+
+    public AbstractInsnNode getBoxingInsn() {
+        return boxingInsn;
     }
 }
