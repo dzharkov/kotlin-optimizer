@@ -1,4 +1,4 @@
-package ru.spbau.mit.optimizer.boxing;
+package ru.spbau.mit.analyzer.boxing;
 
 
 import org.jetbrains.org.objectweb.asm.MethodVisitor;
@@ -8,37 +8,48 @@ import org.jetbrains.org.objectweb.asm.tree.AbstractInsnNode;
 import org.jetbrains.org.objectweb.asm.tree.MethodInsnNode;
 import org.jetbrains.org.objectweb.asm.tree.MethodNode;
 import org.jetbrains.org.objectweb.asm.tree.analysis.*;
+import ru.spbau.mit.MethodTransformer;
 
-import javax.swing.*;
 import java.util.List;
 
-public class RedundantBoxingMethodVisitor extends MethodVisitor {
-    private final String owner;
+public class RedundantBoxingAnalyzerTransformer extends MethodTransformer {
+    private int totalProblemsCount = 0;
+    private int totalRangeProblemsCount = 0;
 
-
-    public RedundantBoxingMethodVisitor(String owner, int access, String name, String desc, String signature) {
-        super(Opcodes.ASM5, new MethodNode(access, name, desc, signature, null));
-        this.owner = owner;
+    public RedundantBoxingAnalyzerTransformer(MethodTransformer methodTransformer) {
+        super(methodTransformer);
     }
 
     @Override
-    public void visitEnd() {
-        MethodNode mn = (MethodNode) mv;
+    public void transform(String owner, MethodNode methodNode) {
 
-        Analyzer<BasicValue> analyzer = new Analyzer<>(new RedundantBoxingInterpreter());
+        Analyzer<BasicValue> analyzer = new Analyzer<BasicValue>(new RedundantBoxingInterpreter());
 
         int potentialProblemsCount = 0;
+        int rangeUnboxingCount = 0;
 
         try {
-            analyzer.analyze(owner, mn);
+            analyzer.analyze(owner, methodNode);
 
             Frame<BasicValue>[] frames = analyzer.getFrames();
-            AbstractInsnNode[] insnNodes = mn.instructions.toArray();
+            AbstractInsnNode[] insnNodes = methodNode.instructions.toArray();
 
             for (int i = 0; i < insnNodes.length; i++) {
-                if (isUnboxing(insnNodes[i]) && frames[i].getStack(frames[i].getStackSize()-1) instanceof BoxedBasicValue) {
+
+                if (frames[i] == null || frames[i].getStackSize() == 0) {
+                    continue;
+                }
+
+                BasicValue topValue = frames[i].getStack(frames[i].getStackSize()-1);
+                if (isUnboxing(insnNodes[i]) && topValue instanceof BoxedBasicValue) {
+
+                    if (((BoxedBasicValue) topValue).isFromRange()) {
+                        rangeUnboxingCount++;
+                    }
+
                     potentialProblemsCount++;
                 }
+
             }
 
         } catch (AnalyzerException e) {
@@ -46,8 +57,22 @@ public class RedundantBoxingMethodVisitor extends MethodVisitor {
         }
 
         if (potentialProblemsCount > 0) {
-            System.out.println(Integer.valueOf(potentialProblemsCount).toString() + " problems found in " + owner + "." + mn.name + "(" + mn.signature + ")");
+            totalProblemsCount += potentialProblemsCount;
+            totalRangeProblemsCount += rangeUnboxingCount;
+
+            System.out.println(
+                    potentialProblemsCount + "/" + rangeUnboxingCount +
+                    " problems found in " +
+                    owner + "." + methodNode.name + "(" + methodNode.signature + ")");
         }
+    }
+
+    public int getTotalProblemsCount() {
+        return totalProblemsCount;
+    }
+
+    public int getTotalRangeProblemsCount() {
+        return totalRangeProblemsCount;
     }
 
     private boolean isUnboxing(AbstractInsnNode insn) {
@@ -66,19 +91,15 @@ public class RedundantBoxingMethodVisitor extends MethodVisitor {
             return false;
         }
 
-        switch (owner.substring("java/lang/".length())) {
-            case "Integer":
-            case "Double":
-            case "Long":
-            case "Char":
-            case "Byte":
-            case "Boolean":
-            case "Void":
-            case "Number":
-                return true;
-            default:
-                return false;
-        }
+        String className = owner.substring("java/lang/".length());
+
+        return (className.equals("Integer") ||
+                className.equals("Double") ||
+                className.equals("Long") ||
+                className.equals("Char") ||
+                className.equals("Byte") ||
+                className.equals("Boolean")) ||
+               className.endsWith("Number");
     }
 
     private boolean isUnboxingMethod(String name) {
@@ -110,7 +131,7 @@ public class RedundantBoxingMethodVisitor extends MethodVisitor {
                     isClassBox(((MethodInsnNode) insn).owner) &&
                     ((MethodInsnNode) insn).name.equals("valueOf")) {
 
-                return BoxedBasicValue.instance(value.getType());
+                return new BoxedBasicValue(value.getType());
             }
 
             if (opcode == Opcodes.INVOKEINTERFACE &&
@@ -123,7 +144,7 @@ public class RedundantBoxingMethodVisitor extends MethodVisitor {
             if (opcode == Opcodes.INVOKEINTERFACE &&
                     values.get(0) == BoxedBasicValue.PROGRESSION_ITERATOR &&
                     ((MethodInsnNode) insn).name.equals("next")) {
-                return BoxedBasicValue.instance(value.getType());
+                return new BoxedBasicValue(value.getType(), true);
             }
 
             return value;

@@ -1,4 +1,4 @@
-package ru.spbau.mit.optimizer.boxing;
+package ru.spbau.mit.analyzer.boxing;
 
 import org.jetbrains.org.objectweb.asm.Opcodes;
 import org.jetbrains.org.objectweb.asm.Type;
@@ -6,22 +6,23 @@ import org.jetbrains.org.objectweb.asm.tree.AbstractInsnNode;
 import org.jetbrains.org.objectweb.asm.tree.MethodInsnNode;
 import org.jetbrains.org.objectweb.asm.tree.MethodNode;
 import org.jetbrains.org.objectweb.asm.tree.analysis.*;
+import ru.spbau.mit.MethodTransformer;
 
 import java.util.List;
 
-public class RedundantNullCheckMethodVisitor extends AnalyzerMethodVisitor {
+public class RedundantNullCheckMethodTransformer extends MethodTransformer {
     private static final BasicValue NULL_VALUE = new BasicValue(Type.getObjectType("null"));
     private static final BasicValue MIXED_NULLABILITY_VALUE = new BasicValue(Type.getType("mixed_nullability"));
 
-    public RedundantNullCheckMethodVisitor(String owner, int access, String name, String desc, String signature) {
-        super(owner, access, name, desc, signature);
+    public RedundantNullCheckMethodTransformer(MethodTransformer methodTransformer) {
+        super(methodTransformer);
     }
 
     @Override
-    public void visitEnd() {
-        MethodNode mn = (MethodNode) mv;
+    public void transform(String owner, MethodNode methodNode) {
+        MethodNode mn = methodNode;
 
-        Analyzer<BasicValue> analyzer = new Analyzer<>(new RedundantNullCheckInterpreter());
+        Analyzer<BasicValue> analyzer = new Analyzer<BasicValue>(new RedundantNullCheckInterpreter());
 
         int potentialProblemsCount = 0;
         int surelyRedundantCheck = 0;
@@ -111,19 +112,15 @@ public class RedundantNullCheckMethodVisitor extends AnalyzerMethodVisitor {
                 return false;
             }
 
-            switch (owner.substring("java/lang/".length())) {
-                case "Integer":
-                case "Double":
-                case "Long":
-                case "Char":
-                case "Byte":
-                case "Boolean":
-                case "Void":
-                case "Number":
-                    return true;
-                default:
-                    return false;
-            }
+            String className = owner.substring("java/lang/".length());
+
+            return (className.equals("Integer") ||
+                    className.equals("Double") ||
+                    className.equals("Long") ||
+                    className.equals("Char") ||
+                    className.equals("Byte") ||
+                    className.equals("Boolean")) ||
+                   className.endsWith("Number");
         }
 
         @Override
